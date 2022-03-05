@@ -1,26 +1,10 @@
-setwd("/Users/minwoocho/Desktop/qbio_studentresearch_minwooc/analysis_data/")
+setwd("/Users/minwoocho/Desktop/qbio_data_analysis_minwooc/analysis_data/")
 library(TCGAbiolinks)
 library(SummarizedExperiment)
-query <- GDCquery(project = "TCGA-COAD", 
-                  data.category = "Transcriptome Profiling", # get the RNA-seq transcriptome
-                  data.type = "Gene Expression Quantification", # gets the counts
-                  workflow.type = "HTSeq - Counts") # gets the raw counts processed by this method
-GDCdownload(query) # only need to download the data once! Comment this out once you have completed it once
-sum_exp <- GDCprepare(query)
-
-clin_query <- GDCquery(project = "TCGA-COAD", data.category = "Clinical", file.type = "xml")
-clinic <- GDCprepare_clinic(clin_query, clinical.info = "patient")
-# Just adding an underscore between follow and up
-names(clinic)[names(clinic)=="days_to_last_followup"] <- "days_to_last_follow_up"
-clinic_copy <- clinic
-
 library(maftools)
 
 maf_dataframe <- data.table::fread("./GDCdata/TCGA.COAD.mutect.03652df4-6090-4f5a-a2ff-ee28a37f9301.DR-10.0.somatic.maf.csv", data.table = F)
-clinic <- data.table::fread("./coad_clinical_data.csv",
-                            data.table = F)
 colnames(clinic)[ colnames(clinic) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
-
 mutation_query <- GDCquery_Maf(tumor = "COAD", 
                                pipeline = "mutect2",
                                save.csv = TRUE)
@@ -28,6 +12,23 @@ mutation_query <- GDCquery_Maf(tumor = "COAD",
 maf_object <- read.maf(maf = mutation_query, 
                        clinicalData = clinic, 
                        isTCGA = TRUE)
+# maf gender analysis
+clinic <- maf_object@clinical.data
+
+name <- ifelse(clinic$gender=="MALE", TRUE, FALSE)
+male_patient_ids <- clinic[name, Tumor_Sample_Barcode]
+male_maf <- subsetMaf(maf = maf_object,
+                      tsb = male_patient_ids)
+
+name2 <- ifelse(clinic$gender=="FEMALE", TRUE, FALSE)
+female_patient_ids <- clinic[name2, Tumor_Sample_Barcode]
+female_maf = subsetMaf(maf = maf_object,
+                    tsb = female_patient_ids)
+
+coOncoplot(m1 = male_maf, 
+           m2 = female_maf, 
+           m1Name = "Male Patients", 
+           m2Name = "Female Patients")
 
 # over/under expression of gene y in gender
 library(DESeq2)
@@ -110,15 +111,19 @@ volcano_plot
 # KM curve
 library(survival)
 library(survminer)
-
+clinic_copy <- clinic
 clinic_copy$days_to_death <- ifelse(is.na(clinic_copy$days_to_death), clinic_copy$days_to_last_follow_up, clinic_copy$days_to_death)
+
+clinic_copy$survival_time <- as.numeric(clinic_copy$days_to_death)
+
 clinic_copy$death_event = as.integer(clinic$vital_status == "Dead")
 
-surv_object <- Surv(time = clinic_copy$days_to_death, 
-                    event = clinic_copy$death_event)
-race_fit <- surv_fit( surv_object ~ clinic_copy$race_list, data = clinic_copy )
 
-survplot = ggsurvplot(race_fit, 
+surv_object <- Surv(time = clinic_copy$survival_time, 
+                    event = clinic_copy$death_event)
+gender_fit <- surv_fit( surv_object ~ clinic_copy$gender, data = clinic_copy )
+
+survplot = ggsurvplot(gender_fit, 
                       pval=TRUE, 
                       ggtheme = theme(plot.margin = unit(c(1,1,1,1), "cm")), 
                       legend = "right")
